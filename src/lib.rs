@@ -40,6 +40,10 @@ pub enum TokenType {
     BatchedTokenRistretto255 = 0xF91A,
     /// Batched token 2
     BatchedTokenP384 = 0xF901,
+    /// Publicly verifiable token with public metadata
+    PublicMetadata = 0xDA7A,
+    /// Privately verifiable token with public metadata
+    PrivateMetadata = 0xDA7B,
 }
 
 /// Token key ID

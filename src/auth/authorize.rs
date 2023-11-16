@@ -336,7 +336,7 @@ fn builder_parser_extensions_test() {
     let token_key_id = [3u8; 32];
     let authenticator = [4u8; 32];
     let token = Token::<U32>::new(
-        TokenType::Private,
+        TokenType::PrivateToken,
         nonce,
         challenge_digest,
         token_key_id,
@@ -348,7 +348,7 @@ fn builder_parser_extensions_test() {
     assert_eq!(header_name, http::header::AUTHORIZATION);
 
     let (token, maybe_extensions) = parse_authorization_header_ext::<U32>(&header_value).unwrap();
-    assert_eq!(token.token_type(), TokenType::Private);
+    assert_eq!(token.token_type(), TokenType::PrivateToken);
     assert_eq!(token.nonce(), nonce);
     assert_eq!(token.challenge_digest(), &challenge_digest);
     assert_eq!(token.token_key_id(), &token_key_id);
