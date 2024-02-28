@@ -33,6 +33,7 @@ use super::{base64_char, key_name, opt_spaces, space};
 /// ```
 
 #[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct Token<Nk: ArrayLength<u8>> {
     token_type: TokenType,
     nonce: Nonce,
@@ -153,7 +154,7 @@ pub fn build_authorization_header<Nk: ArrayLength<u8>>(
 
 /// Builds a `Authorize` header according to the following scheme:
 ///
-/// `PrivateToken token=... extensions=...`
+/// `PrivateToken token="...", extensions="..."`
 ///
 /// # Errors
 /// Returns an error if the token is not valid.
@@ -162,7 +163,7 @@ pub fn build_authorization_header_ext<Nk: ArrayLength<u8>>(
     extensions: &[u8],
 ) -> Result<(HeaderName, HeaderValue), BuildError> {
     let value = format!(
-        "PrivateToken token={} extensions={}",
+        "PrivateToken token=\"{}\", extensions=\"{}\"",
         URL_SAFE.encode(
             token
                 .tls_serialize_detached()
@@ -248,7 +249,10 @@ fn parse_private_token(input: &str) -> IResult<&str, (&str, Option<&str>)> {
     let (input, _) = opt_spaces(input)?;
     let (input, _) = tag_no_case("PrivateToken")(input)?;
     let (input, _) = many1(space)(input)?;
-    let (input, key_values) = separated_list1(tag(" "), parse_key_value)(input)?;
+    let (input, key_values) = separated_list1(
+        alt((tag(","), tag(" "))), // quirk: key=values separated by " " are not RFC 9110 compliant.
+        parse_key_value,
+    )(input)?;
 
     let mut token = None;
     let mut extensions = None;
@@ -311,58 +315,86 @@ fn parse_header_value<Nk: ArrayLength<u8>>(
     Ok(tokens)
 }
 
-#[test]
-fn builder_parser_test() {
-    use generic_array::typenum::U32;
+#[cfg(test)]
+mod tests {
+    use generic_array::GenericArray;
+    use http::HeaderValue;
+    use typenum::U32;
 
-    let nonce = [1u8; 32];
-    let challenge_digest = [2u8; 32];
-    let token_key_id = [3u8; 32];
-    let authenticator = [4u8; 32];
-    let token = Token::<U32>::new(
-        TokenType::PrivateToken,
-        nonce,
-        challenge_digest,
-        token_key_id,
-        GenericArray::clone_from_slice(&authenticator),
-    );
-    let (header_name, header_value) = build_authorization_header(&token).unwrap();
+    use crate::auth::authorize::{
+        build_authorization_header, build_authorization_header_ext, parse_authorization_header,
+        parse_authorization_header_ext, Token,
+    };
+    use crate::TokenType;
 
-    assert_eq!(header_name, http::header::AUTHORIZATION);
+    #[test]
+    fn builder_parser_test() {
+        use generic_array::typenum::U32;
 
-    let token = parse_authorization_header::<U32>(&header_value).unwrap();
-    assert_eq!(token.token_type(), TokenType::PrivateToken);
-    assert_eq!(token.nonce(), nonce);
-    assert_eq!(token.challenge_digest(), &challenge_digest);
-    assert_eq!(token.token_key_id(), &token_key_id);
-    assert_eq!(token.authenticator(), &authenticator);
-}
+        let token = test_token();
+        let (header_name, header_value) = build_authorization_header(&token).unwrap();
 
-#[test]
-fn builder_parser_extensions_test() {
-    use generic_array::typenum::U32;
+        assert_eq!(header_name, http::header::AUTHORIZATION);
 
-    let nonce = [1u8; 32];
-    let challenge_digest = [2u8; 32];
-    let token_key_id = [3u8; 32];
-    let authenticator = [4u8; 32];
-    let token = Token::<U32>::new(
-        TokenType::PrivateToken,
-        nonce,
-        challenge_digest,
-        token_key_id,
-        GenericArray::clone_from_slice(&authenticator),
-    );
-    let extensions = b"hello world";
-    let (header_name, header_value) = build_authorization_header_ext(&token, extensions).unwrap();
+        let token = parse_authorization_header::<U32>(&header_value).unwrap();
+        assert_eq!(token, test_token());
+    }
 
-    assert_eq!(header_name, http::header::AUTHORIZATION);
+    #[test]
+    fn builder_parser_extensions_test() {
+        use generic_array::typenum::U32;
 
-    let (token, maybe_extensions) = parse_authorization_header_ext::<U32>(&header_value).unwrap();
-    assert_eq!(token.token_type(), TokenType::PrivateToken);
-    assert_eq!(token.nonce(), nonce);
-    assert_eq!(token.challenge_digest(), &challenge_digest);
-    assert_eq!(token.token_key_id(), &token_key_id);
-    assert_eq!(token.authenticator(), &authenticator);
-    assert_eq!(maybe_extensions, Some(extensions.to_vec()));
+        let token = test_token();
+        let extensions = b"hello world";
+        let (header_name, header_value) =
+            build_authorization_header_ext(&token, extensions).unwrap();
+
+        assert_eq!(header_name, http::header::AUTHORIZATION);
+
+        let (token, maybe_extensions) =
+            parse_authorization_header_ext::<U32>(&header_value).unwrap();
+        assert_eq!(token, test_token());
+        assert_eq!(maybe_extensions, Some(extensions.to_vec()));
+    }
+
+    /// This is the same test as `builder_parser_extensions_test`, however we
+    /// replace the `, ` separator with a ` ` (single space) to make sure the
+    /// library can handle tokens with the older header format.
+    ///
+    /// This and the associated quirk is to be deleted when all clients have
+    /// upgraded.
+    #[test]
+    fn rfc_9110_regression_test() {
+        use generic_array::typenum::U32;
+
+        let token = test_token();
+        let extensions = b"hello world";
+        let (header_name, header_value) =
+            build_authorization_header_ext(&token, extensions).unwrap();
+
+        // remove the separating comma from the generated header:
+        let header_value =
+            HeaderValue::from_str(&header_value.to_str().unwrap().replace(", ", " ")).unwrap();
+
+        assert_eq!(header_name, http::header::AUTHORIZATION);
+
+        let (token, maybe_extensions) =
+            parse_authorization_header_ext::<U32>(&header_value).unwrap();
+        assert_eq!(token, test_token());
+        assert_eq!(maybe_extensions, Some(extensions.to_vec()));
+    }
+
+    fn test_token() -> Token<U32> {
+        let nonce = [1u8; 32];
+        let challenge_digest = [2u8; 32];
+        let token_key_id = [3u8; 32];
+        let authenticator = [4u8; 32];
+        Token::<U32>::new(
+            TokenType::PrivateToken,
+            nonce,
+            challenge_digest,
+            token_key_id,
+            GenericArray::clone_from_slice(&authenticator),
+        )
+    }
 }
