@@ -24,9 +24,9 @@ pub(crate) fn parse_u32(input: &str) -> Result<u32, std::num::ParseIntError> {
 }
 
 pub(crate) fn base64_char(input: &str) -> IResult<&str, &str> {
-    nom::bytes::complete::is_a("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=")(
-        input,
-    )
+    nom::bytes::complete::is_a(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=+/",
+    )(input)
 }
 
 pub(crate) fn key_name(input: &str) -> IResult<&str, &str> {

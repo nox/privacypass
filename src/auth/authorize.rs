@@ -1,7 +1,7 @@
 //! This module contains the authorization logic for redemption phase of the
 //! protocol.
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use generic_array::{ArrayLength, GenericArray};
 use http::{header::HeaderName, HeaderValue};
@@ -304,6 +304,8 @@ fn parse_header_value<Nk: ArrayLength<u8>>(
                 Token::tls_deserialize(
                     &mut URL_SAFE
                         .decode(token_value)
+                        // quirk: allow STANDARD b64 alphabet for token bytes.
+                        .or_else(|_| STANDARD.decode(token_value))
                         .map_err(|_| ParseError::InvalidToken)?
                         .as_slice(),
                 )
